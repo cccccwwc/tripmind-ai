@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">TripMind AI</title>
+  <desc id="desc">由路线、定位点与星光组成的 TripMind AI 标志</desc>
+  <defs>
+    <linearGradient id="bg" x1="8" y1="6" x2="56" y2="60" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0A84FF"/>
+      <stop offset="1" stop-color="#0066CC"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#003E80" flood-opacity=".24"/>
+    </filter>
+  </defs>
+  <rect width="64" height="64" rx="18" fill="url(#bg)"/>
+  <path d="M16 43c6-1 7-8 13-9 7-1 9 7 18 4" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-dasharray="1 7"/>
+  <path d="M45 20c0 7-9 16-9 16s-9-9-9-16a9 9 0 1 1 18 0Z" fill="#fff" filter="url(#shadow)"/>
+  <circle cx="36" cy="20" r="3.5" fill="#0A84FF"/>
+  <path d="m49 11 1.4 3.6L54 16l-3.6 1.4L49 21l-1.4-3.6L44 16l3.6-1.4L49 11Z" fill="#B9E1FF"/>
+</svg>

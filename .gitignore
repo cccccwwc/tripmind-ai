@@ -1,0 +1,39 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Python environments and caches
+.venv/
+venv/
+env/
+**/.venv/
+**/venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Frontend dependencies and builds
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+
+# Runtime data and generated reports
+*.db
+*.db-*
+backend/data/
+backend/evals/reports/
+
+# Logs, editor, and OS files
+*.log
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo

@@ -1,0 +1,2 @@
+{"case_id":"TM-001","scores":{"correctness":5,"route_practicality":4,"preference_alignment":5,"explanation_quality":4},"comments":"景点与需求一致；仍需人工检查真实交通时间。","reviewer":"reviewer-name"}
+{"case_id":"TM-028","scores":{"correctness":5,"route_practicality":5,"preference_alignment":5,"explanation_quality":4},"comments":"正确识别日期与明确天数冲突，没有提前启动正式规划。","reviewer":"reviewer-name"}
