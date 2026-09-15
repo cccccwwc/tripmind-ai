@@ -11,9 +11,11 @@ TripMind AI 是一个面向真实旅行场景的智能规划应用。用户先�
 
 ### 项目演示
 
-[观看中文旁白详细演示](docs/demo/tripmind-demo-detailed.mp4) · [观看 20 秒快速预览](docs/demo/tripmind-demo.mp4)
+#### 中文旁白详细演示（可直接在线播放）
 
-[![TripMind AI 详细演示封面](docs/demo/tripmind-demo-detailed-poster.png)](docs/demo/tripmind-demo-detailed.mp4)
+https://github.com/user-attachments/assets/3bb11e06-715a-4d06-b9e4-eec65e7dce20
+
+[打开视频 Issue](https://github.com/cccccwwc/tripmind-ai/issues/1) · [观看 20 秒快速预览](docs/demo/tripmind-demo.mp4) · [下载详细演示](docs/demo/tripmind-demo-detailed.mp4)
 
 ## 项目亮点
 
