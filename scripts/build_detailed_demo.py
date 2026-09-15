@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 from pathlib import Path
 import re
 import shutil
@@ -180,16 +181,29 @@ def main() -> None:
 
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    narration_audio = args.output.with_name("tripmind-demo-narration.aiff")
+    narration_audio = args.output.with_name("tripmind-demo-narration.mp3")
     silent_video = args.output.with_name("tripmind-demo-detailed-silent.mp4")
     narration_text = args.narration.read_text(encoding="utf-8")
 
-    if not shutil.which("say"):
-        raise SystemExit("macOS 'say' command is required for narrated output")
-    subprocess.run(
-        ["say", "-v", "Tingting", "-r", "195", "-o", str(narration_audio), narration_text],
-        check=True,
-    )
+    try:
+        import edge_tts
+
+        speech = edge_tts.Communicate(
+            narration_text,
+            "zh-CN-XiaoxiaoNeural",
+            rate="+6%",
+            volume="+0%",
+            pitch="-2Hz",
+        )
+        asyncio.run(speech.save(str(narration_audio)))
+    except Exception as exc:
+        if not shutil.which("say"):
+            raise SystemExit(f"Neural voice failed and no local fallback is available: {exc}") from exc
+        narration_audio = args.output.with_name("tripmind-demo-narration.aiff")
+        subprocess.run(
+            ["say", "-v", "Flo (中文（中国大陆）)", "-r", "190", "-o", str(narration_audio), narration_text],
+            check=True,
+        )
 
     slides = [
         title_slide("先聊清楚，再开始规划", "完整旅行 Agent 产品演示", "约 2 分钟 · 陈稳畅个人实习项目"),
