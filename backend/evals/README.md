@@ -38,8 +38,9 @@ evals/
 | 工具参数正确率 | 对每个期望调用比较城市、日期、偏好等关键参数 |
 | POI 城市通过率 | 高德返回城市或地址与目的地一致 |
 | POI 坐标通过率 | 坐标存在且位于中国经纬度合理范围 |
-| POI 开放状态通过率 | `operational_status == available`；`unknown` 不算通过 |
-| POI 综合通过率 | POI ID、名称非占位、城市、坐标、开放状态全部通过 |
+| POI 身份通过率 | POI ID 存在且名称不是占位文本 |
+| POI 营业状态数据覆盖率 | `operational_status` 明确为 `available` 或 `unavailable` 的比例；`unknown` 如实保留 |
+| POI 综合通过率 | POI ID、名称、城市、坐标均通过，且没有明确标记为关闭 |
 | 时间冲突率 | 相邻时间段重叠、非法时间和空白日程占所有检查项的比例 |
 | 选择地点覆盖率 | 用户勾选地点是否出现在景点清单或 attraction 时间轴 |
 | 降级触发率 | `fallback` 节点、`fallback_plan` 或工作流错误占正式规划样本比例 |
@@ -82,6 +83,8 @@ python -m evals.runner \
 ```
 
 `--confirm-live` 是强制成本保护。首次只跑 5 条；确认稳定后去掉 `--limit` 执行全部 30 条。运行器会调用对话澄清接口、提交后台任务、等待 LangGraph 完成并收集 SSE 轨迹。真实运行记录会一起保存，后续可以零成本离线回放。
+
+仓库同时提供手动触发的 `Live agent evaluation` GitHub Actions 工作流。配置 `LLM_API_KEY`、`AMAP_API_KEY` 等 Repository Secrets 后，可从 Actions 页面选择 5、10、20 或 30 条真实样本；工作流不会随普通 push 自动执行，避免意外消耗额度，结果会作为 Artifact 保留 30 天。
 
 ## 3. 人工评分
 

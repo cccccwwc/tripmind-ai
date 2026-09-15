@@ -1,0 +1,44 @@
+{
+  "schema_version": "2.0",
+  "published_at": "2026-09-16",
+  "dataset": {
+    "path": "backend/evals/data/trip_eval_dataset.jsonl",
+    "total_cases": 30,
+    "evaluated_cases": 10,
+    "live_api": true,
+    "llm_judged_cases": 3
+  },
+  "model": "deepseek-flash",
+  "summary": {
+    "rule_score": 0.995,
+    "brief_accuracy": 0.975,
+    "tool_selection_f1": 1.0,
+    "tool_argument_accuracy": 1.0,
+    "poi_identity_pass_rate": 1.0,
+    "poi_city_pass_rate": 1.0,
+    "poi_coordinate_pass_rate": 1.0,
+    "poi_combined_pass_rate": 1.0,
+    "poi_open_status_coverage_rate": 0.0,
+    "schedule_conflict_rate": 0.0,
+    "selected_place_coverage_rate": 1.0,
+    "fallback_rate": 0.0,
+    "completion_rate": 1.0,
+    "average_latency_ms": 88407.47,
+    "estimated_input_tokens": 724,
+    "estimated_output_tokens": 56790,
+    "estimated_api_cost_usd": 0.068366,
+    "llm_judge_score_first_3": 0.3167,
+    "human_score": null
+  },
+  "pricing_assumption": {
+    "input_usd_per_million": 0.30,
+    "output_usd_per_million": 1.20,
+    "uses_peak_price_upper_bound": true
+  },
+  "limitations": [
+    "POI opening status is not supplied by AMap place text search and remains unknown.",
+    "Business token usage is estimated because internal provider usage is not yet aggregated.",
+    "The LLM judge sampled only the first three cases.",
+    "The before/after integration comparison uses different sample counts and is not a causal model A/B test."
+  ]
+}

@@ -1,0 +1,95 @@
+name: Live agent evaluation
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: Number of real cases to run (1-30)
+        required: true
+        default: "10"
+        type: choice
+        options:
+          - "5"
+          - "10"
+          - "20"
+          - "30"
+      judge_sample:
+        description: Number of cases reviewed by LLM-as-judge
+        required: true
+        default: "3"
+        type: choice
+        options:
+          - "0"
+          - "3"
+          - "5"
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_BASE_URL: https://api.deepseek.com
+      LLM_MODEL_ID: deepseek-flash
+      AMAP_API_KEY: ${{ secrets.AMAP_API_KEY }}
+      TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+      UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
+      LANGGRAPH_CHECKPOINT_PATH: /tmp/tripmind-eval/checkpoints.db
+      TRAVEL_MEMORY_DB_PATH: /tmp/tripmind-eval/memory.db
+      TRIP_JOB_DB_PATH: /tmp/tripmind-eval/jobs.db
+      EVAL_LIMIT: ${{ inputs.limit }}
+      JUDGE_SAMPLE: ${{ inputs.judge_sample }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+      - run: python -m pip install -r requirements-dev.txt
+      - name: Validate required secrets
+        run: |
+          test -n "$LLM_API_KEY"
+          test -n "$AMAP_API_KEY"
+      - name: Start TripMind API
+        run: |
+          python -m uvicorn app.api.main:app --host 127.0.0.1 --port 8000 > /tmp/tripmind-api.log 2>&1 &
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:8000/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/tripmind-api.log
+          exit 1
+      - name: Run real evaluation
+        run: |
+          python -m evals.runner \
+            --live --confirm-live \
+            --limit "$EVAL_LIMIT" \
+            --judge-sample "$JUDGE_SAMPLE" \
+            --base-url http://127.0.0.1:8000 \
+            --input-cost-per-million 0.30 \
+            --output-cost-per-million 1.20 \
+            --output-dir evals/reports/live-ci \
+            --fail-on-threshold
+      - name: Upload evaluation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tripmind-live-evaluation-${{ github.run_id }}
+          path: |
+            backend/evals/reports/live-ci/evaluation-*.json
+            backend/evals/reports/live-ci/evaluation-*.md
+            backend/evals/reports/live-ci/human-review-*.jsonl
+          if-no-files-found: warn
+          retention-days: 30

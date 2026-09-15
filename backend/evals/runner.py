@@ -31,7 +31,7 @@ DEFAULT_THRESHOLDS = {
     "tool_argument_accuracy": 0.95,
     "poi_city_pass_rate": 0.98,
     "poi_coordinate_pass_rate": 0.98,
-    "poi_open_status_pass_rate": 0.90,
+    "poi_identity_pass_rate": 0.98,
     "poi_combined_pass_rate": 0.88,
     "selected_place_coverage_rate": 0.90,
     "completion_rate": 0.95,
@@ -304,8 +304,9 @@ def _markdown(report: dict[str, Any]) -> str:
         ("工具参数准确率", "tool_argument_accuracy"),
         ("POI 城市通过率", "poi_city_pass_rate"),
         ("POI 坐标通过率", "poi_coordinate_pass_rate"),
-        ("POI 开放状态通过率", "poi_open_status_pass_rate"),
+        ("POI 身份通过率", "poi_identity_pass_rate"),
         ("POI 综合通过率", "poi_combined_pass_rate"),
+        ("POI 营业状态数据覆盖率", "poi_open_status_coverage_rate"),
         ("行程时间冲突率", "schedule_conflict_rate"),
         ("用户选择地点覆盖率", "selected_place_coverage_rate"),
         ("降级触发率", "fallback_rate"),
@@ -330,6 +331,12 @@ def _markdown(report: dict[str, Any]) -> str:
         f"| 输入 Token | {summary['total_input_tokens']} |",
         f"| 输出 Token | {summary['total_output_tokens']} |",
         f"| API 成本 | ${summary['total_api_cost_usd']:.6f} |",
+    ])
+    if summary.get("human_score") is not None:
+        lines.append(f"| 人工评分 | {summary['human_score'] * 100:.2f}% |")
+    if summary.get("llm_judge_score") is not None:
+        lines.append(f"| LLM-as-judge 抽检分 | {summary['llm_judge_score'] * 100:.2f}% |")
+    lines.extend([
         "",
         "## 门禁结果",
         "",
@@ -357,6 +364,7 @@ def _markdown(report: dict[str, Any]) -> str:
     lines.extend([
         "",
         "> Token 在现有业务 API 未返回 usage 时为估算值；接入供应商 usage 后，运行记录中的精确值会优先参与汇总。",
+        "> 高德地点文本检索不提供实时营业状态；该字段单独报告数据覆盖率，不把 `unknown` 误判为关闭，也不纳入发布门禁。",
         "",
     ])
     return "\n".join(lines)

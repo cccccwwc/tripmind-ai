@@ -81,6 +81,20 @@ def test_bad_run_exposes_tool_poi_schedule_selection_and_fallback_failures():
     assert result["rule_score"] < 0.5
 
 
+def test_unknown_open_status_is_reported_as_uncovered_not_failed():
+    case = {item["id"]: item for item in load_jsonl(DEFAULT_DATASET)}["TM-001"]
+    run = {item["case_id"]: item for item in load_jsonl(DATA_DIR / "sample_runs.jsonl")}["TM-001"]
+    for day in run["trip_plan"]["days"]:
+        for poi in day.get("attractions", []):
+            poi["operational_status"] = "unknown"
+
+    result = evaluate_case(case, run)
+
+    assert result["pois"]["open_status_coverage_rate"] == 0
+    assert result["pois"]["combined_pass_rate"] == 1
+    assert result["rule_score"] == 1
+
+
 def test_summary_tracks_latency_tokens_cost_and_threshold_failures():
     cases = {item["id"]: item for item in load_jsonl(DEFAULT_DATASET)}
     runs = {item["case_id"]: item for item in load_jsonl(DATA_DIR / "sample_runs.jsonl")}

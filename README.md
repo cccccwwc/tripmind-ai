@@ -163,6 +163,10 @@ GitHub Actions 会在每次推送和 Pull Request 时自动执行上述测试及
 
 ### Agent 质量评测
 
+已发布一轮 **10 条真实端到端评测**：Planning Brief 准确率 97.50%、POI 核心校验通过率 100%、时间冲突率 0%、用户选择地点覆盖率 100%、任务完成率 100%，平均耗时 88.41 秒。报告同时保留营业状态覆盖不足和 LLM judge 暴露的路线质量问题，不只展示成功指标。
+
+[查看完整真实评测报告](docs/evaluation/agent-evaluation-2026-09-16.md) · [下载机器可读摘要](docs/evaluation/agent-evaluation-2026-09-16.json)
+
 ```bash
 cd backend
 source .venv/bin/activate

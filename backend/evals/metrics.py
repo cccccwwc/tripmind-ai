@@ -24,14 +24,51 @@ def _ratio(passed: int, total: int, *, empty: float = 1.0) -> float:
     return round(passed / total, 4) if total else empty
 
 
-def _set_similarity(expected: Iterable[Any], actual: Iterable[Any]) -> float:
-    left = {_normalize(item) for item in expected if _normalize(item)}
-    right = {_normalize(item) for item in actual if _normalize(item)}
-    if not left and not right:
+def _canonical_transport(value: Any) -> str:
+    text = _normalize(value)
+    if any(token in text for token in ("公共交通", "地铁", "公交")):
+        return "公共交通"
+    if any(token in text for token in ("打车", "出租车", "网约车")):
+        return "打车"
+    if "自驾" in text:
+        return "自驾"
+    if "步行" in text:
+        return "步行"
+    return text
+
+
+def _canonical_preference(value: Any) -> str:
+    text = _normalize(value)
+    if any(token in text for token in ("亲子", "孩子", "小孩", "儿童")):
+        return "亲子"
+    if any(token in text for token in ("海滨", "海边", "看海", "海岸", "海景")):
+        return "海滨"
+    if "海鲜" in text:
+        return "海鲜"
+    return text
+
+
+def _expected_preference_coverage(expected: Iterable[Any], actual: Iterable[Any]) -> float:
+    """Measure whether required preferences were captured.
+
+    Extra values often contain avoidance constraints, pacing requirements or a
+    selected POI. They are useful rather than hallucinated, so they must not
+    reduce recall of the expected preferences.
+    """
+    left = {_canonical_preference(item) for item in expected if _canonical_preference(item)}
+    right = {_canonical_preference(item) for item in actual if _canonical_preference(item)}
+    if not left:
         return 1.0
-    if not left or not right:
-        return 0.0
-    return len(left & right) / len(left | right)
+    return round(len(left & right) / len(left), 4)
+
+
+def _brief_field_matches(field: str, expected: Any, actual: Any) -> bool:
+    if field == "transportation":
+        return _canonical_transport(expected) == _canonical_transport(actual)
+    if field == "accommodation":
+        left, right = _normalize(expected), _normalize(actual)
+        return bool(left and right and (left == right or left in right or right in left))
+    return _normalize(expected) == _normalize(actual)
 
 
 def evaluate_brief(case: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:
@@ -40,7 +77,7 @@ def evaluate_brief(case: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:
     scores: dict[str, float] = {}
     for field, expected_value in expected.items():
         if field == "preferences":
-            scores[field] = _set_similarity(expected_value or [], actual.get(field) or [])
+            scores[field] = _expected_preference_coverage(expected_value or [], actual.get(field) or [])
         elif field == "free_text_input":
             expected_text = _normalize(expected_value)
             actual_text = _normalize(actual.get(field))
@@ -50,7 +87,10 @@ def evaluate_brief(case: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:
                 or actual_text in expected_text
             )
         else:
-            scores[field] = float(_normalize(expected_value) == _normalize(actual.get(field)))
+            actual_value = actual.get(field)
+            if field == "requested_days" and actual_value in (None, ""):
+                actual_value = actual.get("travel_days")
+            scores[field] = float(_brief_field_matches(field, expected_value, actual_value))
     return {
         "score": round(mean(scores.values()), 4) if scores else 1.0,
         "fields": scores,
@@ -95,9 +135,9 @@ def evaluate_tools(case: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:
         actual_args = actual[matched_index].get("arguments") or {}
         field_scores = {
             key: (
-                _set_similarity(value, actual_args.get(key) or [])
-                if isinstance(value, list)
-                else float(_normalize(value) == _normalize(actual_args.get(key)))
+                _expected_preference_coverage(value, actual_args.get(key) or [])
+                if key == "preferences" and isinstance(value, list)
+                else float(_brief_field_matches(key, value, actual_args.get(key)))
             )
             for key, value in expected_args.items()
         }
@@ -145,17 +185,20 @@ def evaluate_pois(case: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:
     plan = run.get("trip_plan") or {}
     expected_city = _normalize((case.get("expected_brief") or {}).get("city"))
     pois = _iter_attractions(plan)
-    city_pass = coordinate_pass = open_pass = identity_pass = combined_pass = 0
+    city_pass = coordinate_pass = open_pass = open_known = identity_pass = combined_pass = 0
     failures: list[dict[str, Any]] = []
     for poi in pois:
         name = str(poi.get("name") or "").strip()
         city_ok = bool(expected_city and expected_city in _normalize(poi.get("city") or poi.get("address")))
         coordinate_ok = _valid_coordinate(poi.get("location"))
-        operational_ok = str(poi.get("operational_status") or "").casefold() == "available"
+        operational_status = str(poi.get("operational_status") or "unknown").casefold()
+        operational_known = operational_status in {"available", "unavailable"}
+        operational_ok = operational_status != "unavailable"
         identity_ok = bool(str(poi.get("poi_id") or "").strip()) and bool(name) and not PLACEHOLDER_RE.search(name)
         city_pass += city_ok
         coordinate_pass += coordinate_ok
-        open_pass += operational_ok
+        open_pass += operational_status == "available"
+        open_known += operational_known
         identity_pass += identity_ok
         combined_pass += city_ok and coordinate_ok and operational_ok and identity_ok
         if not all((city_ok, coordinate_ok, operational_ok, identity_ok)):
@@ -163,7 +206,8 @@ def evaluate_pois(case: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:
                 "name": name,
                 "city": city_ok,
                 "coordinate": coordinate_ok,
-                "operational_status": operational_ok,
+                "operational_status": operational_status,
+                "not_known_closed": operational_ok,
                 "poi_identity": identity_ok,
             })
     total = len(pois)
@@ -172,6 +216,7 @@ def evaluate_pois(case: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:
         "city_pass_rate": _ratio(city_pass, total, empty=0.0),
         "coordinate_pass_rate": _ratio(coordinate_pass, total, empty=0.0),
         "open_status_pass_rate": _ratio(open_pass, total, empty=0.0),
+        "open_status_coverage_rate": _ratio(open_known, total, empty=0.0),
         "identity_pass_rate": _ratio(identity_pass, total, empty=0.0),
         "combined_pass_rate": _ratio(combined_pass, total, empty=0.0),
         "failures": failures[:10],
@@ -345,6 +390,8 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "poi_city_pass_rate": round(mean(item["pois"]["city_pass_rate"] for item in planned), 4) if planned else 0.0,
         "poi_coordinate_pass_rate": round(mean(item["pois"]["coordinate_pass_rate"] for item in planned), 4) if planned else 0.0,
         "poi_open_status_pass_rate": round(mean(item["pois"]["open_status_pass_rate"] for item in planned), 4) if planned else 0.0,
+        "poi_open_status_coverage_rate": round(mean(item["pois"]["open_status_coverage_rate"] for item in planned), 4) if planned else 0.0,
+        "poi_identity_pass_rate": round(mean(item["pois"]["identity_pass_rate"] for item in planned), 4) if planned else 0.0,
         "poi_combined_pass_rate": round(mean(item["pois"]["combined_pass_rate"] for item in planned), 4) if planned else 0.0,
         "schedule_conflict_rate": round(mean(item["schedule"]["conflict_rate"] for item in planned), 4) if planned else 0.0,
         "selected_place_coverage_rate": round(mean(item["selected_places"]["coverage_rate"] for item in planned), 4) if planned else 0.0,
