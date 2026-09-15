@@ -543,7 +543,10 @@ const mapStatus = ref<MapStatus>('loading')
 const mapErrorTitle = ref('地图暂时无法显示')
 const mapErrorMessage = ref('请稍后重新加载。')
 const staticMapUrl = ref('')
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')
+const defaultApiBaseUrl = import.meta.env.PROD
+  ? window.location.origin
+  : 'http://localhost:8000'
+const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || defaultApiBaseUrl).replace(/\/$/, '')
 const { isVisited, toggleVisited } = useTravelMemory()
 const { isTripSaved, saveTripPlan } = useTripPlanMemory()
 let map: any = null

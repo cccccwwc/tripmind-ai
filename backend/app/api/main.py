@@ -1,6 +1,10 @@
 """FastAPI主应用"""
 
-from fastapi import FastAPI
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from ..config import get_settings, validate_config, print_config
 from .routes import trip, intake, memory, poi, recommendations, map as map_routes
@@ -18,6 +22,17 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend" / "dist"
+FRONTEND_INDEX_FILE = FRONTEND_DIST_DIR / "index.html"
+
+if (FRONTEND_DIST_DIR / "assets").is_dir():
+    app.mount(
+        "/assets",
+        StaticFiles(directory=FRONTEND_DIST_DIR / "assets"),
+        name="frontend-assets",
+    )
 
 # 配置CORS
 app.add_middleware(
@@ -74,6 +89,8 @@ async def shutdown_event():
 @app.get("/")
 async def root():
     """根路径"""
+    if FRONTEND_INDEX_FILE.is_file():
+        return FileResponse(FRONTEND_INDEX_FILE)
     return {
         "name": settings.app_name,
         "version": settings.app_version,
@@ -92,6 +109,25 @@ async def health():
         "service": settings.app_name,
         "version": settings.app_version
     }
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def frontend_spa(full_path: str):
+    """生产环境中托管 Vue 构建产物，并支持 History 路由刷新。"""
+    if full_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="API endpoint not found")
+    if not FRONTEND_INDEX_FILE.is_file():
+        raise HTTPException(status_code=404, detail="Frontend build not found")
+
+    requested_file = (FRONTEND_DIST_DIR / full_path).resolve()
+    try:
+        requested_file.relative_to(FRONTEND_DIST_DIR.resolve())
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="File not found") from exc
+
+    if requested_file.is_file():
+        return FileResponse(requested_file)
+    return FileResponse(FRONTEND_INDEX_FILE)
 
 
 if __name__ == "__main__":

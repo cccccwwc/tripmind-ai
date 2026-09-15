@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -51,7 +52,8 @@ class TripJobManager:
         max_workers: int = 4,
     ):
         backend_root = Path(__file__).resolve().parents[2]
-        self.database_path = Path(database_path) if database_path else backend_root / "data" / "trip_jobs.db"
+        configured_path = database_path or os.getenv("TRIP_JOB_DB_PATH")
+        self.database_path = Path(configured_path) if configured_path else backend_root / "data" / "trip_jobs.db"
         if not self.database_path.is_absolute():
             self.database_path = backend_root / self.database_path
         self.database_path.parent.mkdir(parents=True, exist_ok=True)

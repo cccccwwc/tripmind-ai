@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">TripMind AI system architecture</title>
+  <desc id="desc">Conversation intake, approval, recommendations, LangGraph orchestration, deterministic data tools, validation, route planning and persistence.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f7fbff"/><stop offset="1" stop-color="#eef2ff"/></linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0a84ff"/><stop offset="1" stop-color="#6e5ce6"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#13233a" flood-opacity=".10"/></filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#7890ad"/></marker>
+    <style>
+      .title{font:700 42px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;fill:#10213b}.sub{font:400 20px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;fill:#66758a}.label{font:700 21px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;fill:#16263e}.small{font:400 16px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;fill:#66758a}.white{fill:#fff}.line{stroke:#7890ad;stroke-width:3;fill:none;marker-end:url(#arrow)}.dash{stroke:#8ea1bb;stroke-width:2.5;stroke-dasharray:8 8;fill:none;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1600" height="900" rx="36" fill="url(#bg)"/>
+  <text x="72" y="78" class="title">TripMind AI · 智能旅行规划架构</text>
+  <text x="72" y="113" class="sub">Human-in-the-loop · LangGraph orchestration · deterministic travel data</text>
+
+  <g filter="url(#shadow)"><rect x="70" y="180" width="230" height="128" rx="28" fill="#fff"/><circle cx="132" cy="244" r="34" fill="#e8f3ff"/><text x="121" y="254" class="label" fill="#0a70e8">人</text><text x="184" y="236" class="label">用户</text><text x="184" y="266" class="small">对话・确认・选择</text></g>
+  <g filter="url(#shadow)"><rect x="365" y="162" width="310" height="164" rx="30" fill="url(#brand)"/><text x="405" y="218" class="label white">Vue 3 产品界面</text><text x="405" y="254" class="small white">对话 / 推荐榜单 / 规划结果</text><text x="405" y="284" class="small white">历史行程 / 用户画像 / 地图</text></g>
+  <path d="M300 244H365" class="line"/>
+
+  <g filter="url(#shadow)"><rect x="750" y="162" width="310" height="164" rx="30" fill="#fff"/><text x="790" y="216" class="label">FastAPI Gateway</text><text x="790" y="252" class="small">REST API · SSE 实时进度</text><text x="790" y="282" class="small">静态前端托管 · 健康检查</text></g>
+  <path d="M675 244H750" class="line"/>
+
+  <g filter="url(#shadow)"><rect x="1135" y="162" width="395" height="164" rx="30" fill="#fff"/><text x="1175" y="210" class="label">需求理解与用户确认</text><text x="1175" y="246" class="small">多轮对话 → Planning Brief</text><text x="1175" y="276" class="small">记忆投影 → 审批 → Tavily 推荐</text><text x="1175" y="306" class="small">用户选择后才启动正式规划</text></g>
+  <path d="M1060 244H1135" class="line"/>
+
+  <g filter="url(#shadow)"><rect x="535" y="410" width="530" height="122" rx="30" fill="#17191f"/><text x="575" y="461" class="label white">LangGraph 状态工作流</text><text x="575" y="494" class="small white">并行节点 · 重试 · 条件回路 · 中断恢复</text></g>
+  <path d="M1332 326V365H800V410" class="line"/>
+
+  <g filter="url(#shadow)"><rect x="115" y="625" width="300" height="130" rx="28" fill="#fff"/><text x="153" y="678" class="label">高德 POI 节点</text><text x="153" y="711" class="small">景点 / 酒店 / 坐标</text><text x="153" y="738" class="small">确定性 API 查询</text></g>
+  <g filter="url(#shadow)"><rect x="475" y="625" width="300" height="130" rx="28" fill="#fff"/><text x="513" y="678" class="label">高德天气节点</text><text x="513" y="711" class="small">近期预报 / 远期降级</text><text x="513" y="738" class="small">不由模型编造天气</text></g>
+  <g filter="url(#shadow)"><rect x="835" y="625" width="300" height="130" rx="28" fill="#fff"/><text x="873" y="678" class="label">可靠性校验</text><text x="873" y="711" class="small">城市 / 坐标 / 开放状态</text><text x="873" y="738" class="small">失败返回 POI 节点补搜</text></g>
+  <g filter="url(#shadow)"><rect x="1195" y="625" width="300" height="130" rx="28" fill="url(#brand)"/><text x="1233" y="678" class="label white">路线规划 Agent</text><text x="1233" y="711" class="small white">时间顺序 / 交通 / 预算</text><text x="1233" y="738" class="small white">输出结构化行程</text></g>
+
+  <path d="M690 532V574H265V625" class="line"/><path d="M800 532V625" class="line"/><path d="M910 532V574H985V625" class="line"/>
+  <path d="M415 690H475" class="dash"/><path d="M775 690H835" class="line"/><path d="M1135 690H1195" class="line"/>
+  <path d="M985 625V582H265V625" class="dash"/>
+
+  <g filter="url(#shadow)"><rect x="535" y="808" width="530" height="62" rx="24" fill="#fff"/><text x="570" y="847" class="label">SQLite：任务事件 · 用户记忆 · 工作流检查点</text></g>
+  <path d="M800 532V808" class="dash"/>
+</svg>

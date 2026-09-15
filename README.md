@@ -5,6 +5,16 @@
 
 TripMind AI 是一个面向真实旅行场景的智能规划应用。用户先通过自然语言对话说明目的地、日期和旅行偏好，需求 Agent 会逐轮澄清并生成结构化 Planning Brief；用户明确确认后，系统才组织多个专业 Agent 协作完成景点检索、天气查询、住宿推荐和日程编排，并在可交互地图中展示完整路线。
 
+![TripMind AI 系统架构](docs/tripmind-architecture.svg)
+
+完整架构说明见 [docs/architecture.md](docs/architecture.md)。
+
+### 项目演示
+
+[观看 20 秒产品演示视频](docs/demo/tripmind-demo.mp4)
+
+[![TripMind AI 演示封面](docs/demo/tripmind-demo-poster.png)](docs/demo/tripmind-demo.mp4)
+
 ## 项目亮点
 
 - **LangGraph 多智能体协作**：景点、天气、酒店三个节点并行执行，汇合校验后再交给行程节点。
@@ -115,6 +125,12 @@ npm run dev
 ```
 
 浏览器访问 `http://localhost:5173`。
+
+## 线上部署
+
+项目提供根目录 `Dockerfile` 和 `render.yaml`，可在 Render 使用 Blueprint 一键创建前后端同源的 Web Service。Vue 会在镜像构建阶段生成静态文件，再由 FastAPI 托管；线上不需要单独配置 `VITE_API_BASE_URL`。
+
+部署时在 Render 控制台填写 `LLM_API_KEY`、`AMAP_API_KEY`、`TAVILY_API_KEY`、`UNSPLASH_ACCESS_KEY`、`VITE_AMAP_WEB_JS_KEY` 和 `VITE_AMAP_SECURITY_JS_CODE`，不要把真实 Key 提交到 GitHub。高德 JS Key 需要在高德控制台加入线上域名白名单。健康检查路径为 `/health`。详细说明见 [docs/architecture.md](docs/architecture.md)。
 
 ## 自动化测试
 
