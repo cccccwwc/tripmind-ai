@@ -37,7 +37,7 @@ jobs:
     env:
       LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
       LLM_BASE_URL: https://api.deepseek.com
-      LLM_MODEL_ID: deepseek-flash
+      LLM_MODEL_ID: deepseek-chat
       AMAP_API_KEY: ${{ secrets.AMAP_API_KEY }}
       TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
       UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
@@ -59,8 +59,14 @@ jobs:
       - run: python -m pip install -r requirements-dev.txt
       - name: Validate required secrets
         run: |
-          test -n "$LLM_API_KEY"
-          test -n "$AMAP_API_KEY"
+          missing=0
+          for name in LLM_API_KEY AMAP_API_KEY; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is not configured"
+              missing=1
+            fi
+          done
+          exit "$missing"
       - name: Start TripMind API
         run: |
           python -m uvicorn app.api.main:app --host 127.0.0.1 --port 8000 > /tmp/tripmind-api.log 2>&1 &
