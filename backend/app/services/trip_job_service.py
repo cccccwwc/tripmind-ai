@@ -317,6 +317,7 @@ class TripJobManager:
                 status="completed",
                 extra={
                     "data": trip_plan,
+                    "raw_data": result.get("raw_trip_plan") or None,
                     "poi_validation_report": result.get("poi_validation_report", {}),
                 },
             )

@@ -6,7 +6,7 @@ on:
       limit:
         description: Number of real cases to run (1-30)
         required: true
-        default: "10"
+        default: "30"
         type: choice
         options:
           - "5"
@@ -16,12 +16,13 @@ on:
       judge_sample:
         description: Number of cases reviewed by LLM-as-judge
         required: true
-        default: "3"
+        default: "5"
         type: choice
         options:
           - "0"
           - "3"
           - "5"
+          - "10"
 
 permissions:
   contents: read
@@ -91,5 +92,6 @@ jobs:
             backend/evals/reports/live-ci/evaluation-*.json
             backend/evals/reports/live-ci/evaluation-*.md
             backend/evals/reports/live-ci/human-review-*.jsonl
+            backend/evals/reports/live-ci/live-runs-*.jsonl
           if-no-files-found: warn
           retention-days: 30

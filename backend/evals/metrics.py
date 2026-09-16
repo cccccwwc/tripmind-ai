@@ -5,11 +5,16 @@ from __future__ import annotations
 import re
 from collections import Counter
 from datetime import datetime
+from math import asin, cos, radians, sin, sqrt
 from statistics import mean
 from typing import Any, Iterable
 
 
 PLACEHOLDER_RE = re.compile(r"(?:景点|酒店|餐厅|饭店)\s*[一二三四五六七八九十\d]+$|^第\s*\d+\s*天")
+BLOCKED_POI_TYPE_RE = re.compile(
+    r"公交|地铁站|停车场|寄存|售票处|卫生间|厕所|出入口|"
+    r"公司|房地产|住宅区|施工|建设中|客运站|服务区"
+)
 
 
 def _normalize(value: Any) -> str:
@@ -170,6 +175,174 @@ def _iter_attractions(plan: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _distance_km(left: dict[str, Any], right: dict[str, Any]) -> float | None:
+    try:
+        lon_a, lat_a = float(left["longitude"]), float(left["latitude"])
+        lon_b, lat_b = float(right["longitude"]), float(right["latitude"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    lat_a_rad, lat_b_rad = radians(lat_a), radians(lat_b)
+    delta_lat = lat_b_rad - lat_a_rad
+    delta_lon = radians(lon_b - lon_a)
+    value = sin(delta_lat / 2) ** 2 + cos(lat_a_rad) * cos(lat_b_rad) * sin(delta_lon / 2) ** 2
+    return 2 * 6371.0088 * asin(sqrt(value))
+
+
+def evaluate_poi_types(run: dict[str, Any]) -> dict[str, Any]:
+    pois = _iter_attractions(run.get("trip_plan") or {})
+    known = passed = 0
+    failures: list[dict[str, str]] = []
+    for poi in pois:
+        poi_type = str(poi.get("poi_type") or poi.get("category") or "").strip()
+        typecode = str(poi.get("poi_typecode") or "").strip()
+        # Generic model labels are not independent evidence of a visitable type.
+        type_known = bool(poi_type and poi_type not in {"景点", "景点类别", "景区"})
+        type_ok = type_known and not BLOCKED_POI_TYPE_RE.search(
+            " ".join((poi_type, typecode, str(poi.get("name") or "")))
+        )
+        known += type_known
+        passed += type_ok
+        if not type_ok:
+            failures.append({"name": str(poi.get("name") or ""), "poi_type": poi_type})
+    return {
+        "count": len(pois),
+        "coverage_rate": _ratio(known, len(pois), empty=0.0),
+        "pass_rate": _ratio(passed, len(pois), empty=0.0),
+        "failures": failures[:10],
+    }
+
+
+def evaluate_route_distances(run: dict[str, Any], *, maximum_leg_km: float = 60.0) -> dict[str, Any]:
+    plan = run.get("trip_plan") or {}
+    distances: list[float] = []
+    failures: list[dict[str, Any]] = []
+    for day in plan.get("days") or []:
+        attractions = [item for item in day.get("attractions") or [] if isinstance(item, dict)]
+        for left, right in zip(attractions, attractions[1:]):
+            distance = _distance_km(left.get("location") or {}, right.get("location") or {})
+            if distance is None:
+                continue
+            distances.append(distance)
+            if distance > maximum_leg_km:
+                failures.append({
+                    "date": day.get("date"),
+                    "from": left.get("name"),
+                    "to": right.get("name"),
+                    "distance_km": round(distance, 2),
+                })
+    return {
+        "checked_legs": len(distances),
+        "pass_rate": _ratio(len(distances) - len(failures), len(distances), empty=1.0),
+        "average_leg_km": round(mean(distances), 2) if distances else None,
+        "maximum_leg_km": round(max(distances), 2) if distances else None,
+        "failures": failures[:10],
+    }
+
+
+def evaluate_commute_truth(run: dict[str, Any]) -> dict[str, Any]:
+    checks = [item for item in run.get("route_checks") or [] if isinstance(item, dict)]
+    successful = [item for item in checks if item.get("success")]
+    duration_passes = 0
+    for item in successful:
+        planned = float(item.get("planned_duration_minutes") or 0)
+        actual = float(item.get("actual_duration_seconds") or 0) / 60
+        # Permit a small planning tolerance but catch systematic 30-minute fiction.
+        if planned + 10 >= actual and planned >= actual * 0.8:
+            duration_passes += 1
+    return {
+        "requested_legs": len(checks),
+        "verified_legs": len(successful),
+        "coverage_rate": _ratio(len(successful), len(checks), empty=0.0),
+        "duration_pass_rate": _ratio(duration_passes, len(successful), empty=0.0),
+        "failures": [item for item in successful if not (
+            float(item.get("planned_duration_minutes") or 0) + 10
+            >= float(item.get("actual_duration_seconds") or 0) / 60
+            and float(item.get("planned_duration_minutes") or 0)
+            >= float(item.get("actual_duration_seconds") or 0) / 60 * 0.8
+        )][:10],
+    }
+
+
+def evaluate_avoidance(case: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:
+    terms = [str(item).strip() for item in case.get("avoid_terms") or [] if str(item).strip()]
+    plan = run.get("trip_plan") or {}
+    scheduled_texts: list[str] = []
+    for day in plan.get("days") or []:
+        for item in day.get("attractions") or []:
+            scheduled_texts.extend((str(item.get("name") or ""), str(item.get("description") or "")))
+        for item in day.get("meals") or []:
+            scheduled_texts.extend((str(item.get("name") or ""), str(item.get("description") or "")))
+        for item in day.get("schedule") or []:
+            scheduled_texts.extend((str(item.get("title") or ""), str(item.get("description") or "")))
+    scheduled_texts.append(str(plan.get("overall_suggestions") or ""))
+
+    def violates(term: str) -> bool:
+        needle = _normalize(term)
+        for text in scheduled_texts:
+            normalized = _normalize(text)
+            position = normalized.find(needle)
+            if position < 0:
+                continue
+            prefix = normalized[max(0, position - 6):position]
+            if not any(marker in prefix for marker in ("不吃", "不要", "不安排", "避开", "避免", "非")):
+                return True
+        return False
+
+    violations = [term for term in terms if violates(term)]
+    return {
+        "applicable": bool(terms),
+        "terms": terms,
+        "violations": violations,
+        "pass_rate": _ratio(len(terms) - len(violations), len(terms)),
+    }
+
+
+def evaluate_plan_stage(
+    case: dict[str, Any],
+    run: dict[str, Any],
+    plan_key: str,
+    *,
+    include_route_truth: bool,
+) -> dict[str, Any]:
+    plan = run.get(plan_key) or {}
+    stage_run = {**run, "trip_plan": plan}
+    present = bool(plan)
+    pois = evaluate_pois(case, stage_run) if present else None
+    poi_types = evaluate_poi_types(stage_run) if present else None
+    schedule = evaluate_schedule(stage_run) if present else None
+    selected = evaluate_selected_place_coverage(case, stage_run) if present else None
+    route_distance = evaluate_route_distances(stage_run) if present else None
+    commute = evaluate_commute_truth(stage_run) if include_route_truth and present else None
+    avoidance = evaluate_avoidance(case, stage_run) if present else None
+    components: list[tuple[float, float]] = []
+    if present:
+        components.extend([
+            (pois["combined_pass_rate"], 0.25),
+            (poi_types["pass_rate"], 0.10),
+            (1 - schedule["conflict_rate"], 0.15),
+            (route_distance["pass_rate"], 0.10),
+        ])
+        if case.get("selected_places"):
+            components.append((selected["coverage_rate"], 0.15))
+        if avoidance["applicable"]:
+            components.append((avoidance["pass_rate"], 0.15))
+        if commute and commute["requested_legs"]:
+            components.append((commute["duration_pass_rate"], 0.10))
+    denominator = sum(weight for _, weight in components)
+    score = sum(value * weight for value, weight in components) / denominator if denominator else 0.0
+    return {
+        "present": present,
+        "score": round(score, 4),
+        "pois": pois,
+        "poi_types": poi_types,
+        "schedule": schedule,
+        "selected_places": selected,
+        "route_distance": route_distance,
+        "commute": commute,
+        "avoidance": avoidance,
+    }
+
+
 def _valid_coordinate(location: Any) -> bool:
     if not isinstance(location, dict):
         return False
@@ -313,9 +486,25 @@ def evaluate_case(
     brief = evaluate_brief(case, run)
     tools = evaluate_tools(case, run)
     should_plan = bool(case.get("should_plan", True))
-    pois = evaluate_pois(case, run) if should_plan else None
-    schedule = evaluate_schedule(run) if should_plan else None
-    selected = evaluate_selected_place_coverage(case, run) if should_plan else None
+    raw_observed = bool(run.get("raw_trip_plan"))
+    raw_run = run if "raw_trip_plan" in run else {**run, "raw_trip_plan": run.get("trip_plan")}
+    raw_stage = evaluate_plan_stage(
+        case,
+        raw_run,
+        "raw_trip_plan",
+        include_route_truth=False,
+    ) if should_plan else None
+    if raw_stage is not None:
+        raw_stage["observed"] = raw_observed
+    final_stage = evaluate_plan_stage(
+        case,
+        run,
+        "trip_plan",
+        include_route_truth=True,
+    ) if should_plan else None
+    pois = final_stage["pois"] if final_stage else None
+    schedule = final_stage["schedule"] if final_stage else None
+    selected = final_stage["selected_places"] if final_stage else None
     fallback = _fallback_triggered(run)
     completed = bool(run.get("trip_plan")) if should_plan else not bool(run.get("trip_plan"))
 
@@ -348,6 +537,7 @@ def evaluate_case(
         "pois": pois,
         "schedule": schedule,
         "selected_places": selected,
+        "stages": {"raw": raw_stage, "final": final_stage},
         "fallback_triggered": fallback,
         "latency_ms": float(run.get("latency_ms") or 0),
         "usage": run.get("usage") or {},
@@ -402,9 +592,39 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "total_output_tokens": sum(int(item.get("output_tokens") or 0) for item in usage),
         "total_api_cost_usd": round(sum(float(item.get("api_cost_usd") or 0) for item in usage), 6),
     }
+    for stage_name in ("raw", "final"):
+        stages = [item["stages"][stage_name] for item in planned]
+        present = [stage for stage in stages if stage.get("present")]
+        prefix = f"{stage_name}_"
+        summary[prefix + "output_coverage_rate"] = _ratio(len(present), len(stages), empty=0.0)
+        summary[prefix + "stage_score"] = round(mean(stage["score"] for stage in stages), 4) if stages else 0.0
+        summary[prefix + "poi_type_coverage_rate"] = round(mean(
+            stage["poi_types"]["coverage_rate"] for stage in present
+        ), 4) if present else 0.0
+        summary[prefix + "poi_type_pass_rate"] = round(mean(
+            stage["poi_types"]["pass_rate"] for stage in present
+        ), 4) if present else 0.0
+        route_stages = [stage for stage in present if stage["route_distance"]["checked_legs"]]
+        summary[prefix + "route_distance_pass_rate"] = round(mean(
+            stage["route_distance"]["pass_rate"] for stage in route_stages
+        ), 4) if route_stages else 0.0
+        avoidance_stages = [stage for stage in present if stage["avoidance"]["applicable"]]
+        summary[prefix + "avoidance_pass_rate"] = round(mean(
+            stage["avoidance"]["pass_rate"] for stage in avoidance_stages
+        ), 4) if avoidance_stages else 1.0
+        commute_stages = [stage for stage in present if stage.get("commute") and stage["commute"]["requested_legs"]]
+        summary[prefix + "commute_coverage_rate"] = round(mean(
+            stage["commute"]["coverage_rate"] for stage in commute_stages
+        ), 4) if commute_stages else 0.0
+        summary[prefix + "commute_duration_pass_rate"] = round(mean(
+            stage["commute"]["duration_pass_rate"] for stage in commute_stages
+        ), 4) if commute_stages else 0.0
+    raw_observed = [stage for item in planned if (stage := item["stages"]["raw"]).get("observed")]
+    summary["raw_capture_coverage_rate"] = _ratio(len(raw_observed), len(planned), empty=0.0)
     human = [item["human_review"]["normalized_score"] for item in results if item.get("human_review", {}).get("normalized_score") is not None]
     judges = [item["llm_judgment"]["normalized_score"] for item in results if item.get("llm_judgment", {}).get("normalized_score") is not None]
     summary["human_score"] = round(mean(human), 4) if human else None
+    summary["human_review_coverage_rate"] = _ratio(len(human), len(results), empty=0.0)
     summary["llm_judge_score"] = round(mean(judges), 4) if judges else None
     return summary
 
@@ -413,14 +633,20 @@ def threshold_failures(
     summary: dict[str, Any],
     minimums: dict[str, float],
     maximums: dict[str, float] | None = None,
+    *,
+    require_present: bool = False,
 ) -> list[str]:
     failures = []
     for metric, threshold in minimums.items():
         value = summary.get(metric)
-        if isinstance(value, (int, float)) and value < threshold:
+        if require_present and not isinstance(value, (int, float)):
+            failures.append(f"{metric}: missing < {threshold:.4f}")
+        elif isinstance(value, (int, float)) and value < threshold:
             failures.append(f"{metric}: {value:.4f} < {threshold:.4f}")
     for metric, threshold in (maximums or {}).items():
         value = summary.get(metric)
-        if isinstance(value, (int, float)) and value > threshold:
+        if require_present and not isinstance(value, (int, float)):
+            failures.append(f"{metric}: missing > {threshold:.4f}")
+        elif isinstance(value, (int, float)) and value > threshold:
             failures.append(f"{metric}: {value:.4f} > {threshold:.4f}")
     return failures

@@ -7,6 +7,13 @@
 
 评测采用三层组合：确定性规则负责持续回归；人工评分负责路线可执行性和体验判断；少量 LLM-as-judge 用于扩大语义质量抽检。任何真实 API Key 都不写入数据集或报告。
 
+发布口径不再用一个总分混合所有含义：
+
+- `overall`：全部 30 条版本化样本；
+- `hard-set`：避雷、无障碍、多轮修正、日期冲突、记忆覆盖、节奏限制等高风险切片；
+- `raw`：模型刚返回、尚未经时间轴重建、POI 置换和确定性降级的计划；
+- `final`：经系统校验与修复后真正交付给用户的计划。
+
 ## 目录
 
 ```text
@@ -41,7 +48,11 @@ evals/
 | POI 身份通过率 | POI ID 存在且名称不是占位文本 |
 | POI 营业状态数据覆盖率 | `operational_status` 明确为 `available` 或 `unavailable` 的比例；`unknown` 如实保留 |
 | POI 综合通过率 | POI ID、名称、城市、坐标均通过，且没有明确标记为关闭 |
+| POI 类型覆盖/通过率 | 必须保留高德 `type/typecode`，公交站、寄存处、停车场、住宅区等不得冒充景点 |
 | 时间冲突率 | 相邻时间段重叠、非法时间和空白日程占所有检查项的比例 |
+| 路线距离通过率 | 根据已核验坐标计算每日相邻景点距离，捕捉明显跨区赶场 |
+| 真实通勤时间 | 真实运行使用高德路线 API 核验 transport 路段，统计覆盖率和模型是否低估通勤时间 |
+| 避雷约束 | 数据集使用 `avoid_terms` 保存明确禁止项，最终景点、餐饮、时间轴和说明中均不得出现 |
 | 选择地点覆盖率 | 用户勾选地点是否出现在景点清单或 attraction 时间轴 |
 | 降级触发率 | `fallback` 节点、`fallback_plan` 或工作流错误占正式规划样本比例 |
 | 性能与成本 | 单次耗时、输入/输出 Token、API 成本及汇总 |
@@ -68,7 +79,7 @@ python -m evals.runner \
 
 ## 2. 运行真实端到端评测
 
-先启动后端并确认 `.env` 中的模型和高德配置有效，然后另开终端执行：
+先启动后端并确认 `.env` 中的模型和高德配置有效，然后另开终端执行全量 30 条：
 
 ```bash
 cd backend
@@ -76,13 +87,12 @@ source .venv/bin/activate
 python -m evals.runner \
   --live \
   --confirm-live \
-  --limit 5 \
   --base-url http://localhost:8000 \
   --input-cost-per-million 0 \
   --output-cost-per-million 0
 ```
 
-`--confirm-live` 是强制成本保护。首次只跑 5 条；确认稳定后去掉 `--limit` 执行全部 30 条。运行器会调用对话澄清接口、提交后台任务、等待 LangGraph 完成并收集 SSE 轨迹。真实运行记录会一起保存，后续可以零成本离线回放。
+`--confirm-live` 是强制成本保护。不传 `--limit` 时必须执行全部 30 条。运行器会调用对话澄清接口、提交后台任务、等待 LangGraph 完成、收集原始/最终计划与 SSE 轨迹，并对最终路线抽取高德真实通勤时间。真实运行记录会一起保存，后续可以零成本离线回放。
 
 仓库同时提供手动触发的 `Live agent evaluation` GitHub Actions 工作流。配置 `LLM_API_KEY`、`AMAP_API_KEY` 等 Repository Secrets 后，可从 Actions 页面选择 5、10、20 或 30 条真实样本；工作流不会随普通 push 自动执行，避免意外消耗额度，结果会作为 Artifact 保留 30 天。
 
@@ -126,6 +136,19 @@ python -m evals.runner \
 ```
 
 建议把线上出现的真实失败脱敏后追加为新 case，并保留一套固定回归集。不要只看总分：按 `tags` 分析日期冲突、多轮更正、用户必选地点、记忆覆盖等切片，能更快发现退化原因。
+
+## 6. 严格发布门禁（必须完成人工评分）
+
+真实跑数只产生待审记录，不能单独宣称“发布通过”。评审人填完 30 条 `human-review-*.jsonl` 后，用同一份运行记录执行：
+
+```bash
+python -m evals.runner \
+  --runs evals/reports/live-runs-YYYYMMDD-HHMMSS.jsonl \
+  --human-reviews evals/reports/human-review-YYYYMMDD-HHMMSS.jsonl \
+  --release-gate
+```
+
+`--release-gate` 会同时检查 overall 和 hard-set，要求原始输出捕获率、原始/最终质量分、POI 类型、路线距离、真实通勤、避雷约束以及人工评分全部达标。人工评分覆盖不足 100% 或平均分低于 80% 时，门禁必须失败。
 
 ## 运行记录格式
 

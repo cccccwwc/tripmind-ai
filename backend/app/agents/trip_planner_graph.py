@@ -46,6 +46,7 @@ class TripPlanningState(TypedDict, total=False):
     rejected_attractions: list[dict[str, Any]]
     plan_revision: int
     trip_plan: dict[str, Any]
+    raw_trip_plan: dict[str, Any]
     errors: Annotated[dict[str, str], _merge_dicts]
     events: Annotated[list[dict[str, Any]], operator.add]
 
@@ -299,6 +300,8 @@ class TripPlanningGraph:
                 "address": poi.address,
                 "city": poi.city or request.city,
                 "district": poi.district,
+                "poi_type": poi.poi_type,
+                "poi_typecode": poi.poi_typecode,
                 "location": {
                     "longitude": poi.longitude,
                     "latitude": poi.latitude,
@@ -356,6 +359,8 @@ class TripPlanningGraph:
                 "address": item.address,
                 "city": item.city or request.city,
                 "district": item.district,
+                "poi_type": item.poi_type,
+                "poi_typecode": item.poi_typecode,
                 "location": {"longitude": item.longitude, "latitude": item.latitude},
                 "operational_status": item.operational_status,
                 "data_source": item.data_source or "amap",
@@ -628,6 +633,7 @@ class TripPlanningGraph:
         request = self._request(state)
         if state.get("force_fallback"):
             plan = self.planner._create_fallback_plan(request)
+            raw_plan = None
             response = ""
             mode = "fallback"
             validation_report = self.planner._validate_attraction_reliability(plan, request.city)
@@ -652,7 +658,7 @@ class TripPlanningGraph:
                 raise
             except Exception as error:
                 return self._planner_error(state, error)
-            plan = self.planner._parse_response(response, request)
+            raw_plan, plan = self.planner._parse_response_stages(response, request)
             mode = "retried" if attempts > 1 else "completed"
             self.planner._apply_verified_hotels(
                 plan,
@@ -667,6 +673,7 @@ class TripPlanningGraph:
 
         return {
             "trip_plan": plan.model_dump(mode="json"),
+            "raw_trip_plan": raw_plan.model_dump(mode="json") if raw_plan else {},
             "poi_validation_report": validation_report.to_dict(),
             "plan_revision": int(state.get("plan_revision", 0)) + 1,
             "status": "validating_plan",
@@ -689,6 +696,7 @@ class TripPlanningGraph:
         validation_report = self.planner._validate_attraction_reliability(plan, request.city)
         return {
             "trip_plan": plan.model_dump(mode="json"),
+            "raw_trip_plan": {},
             "poi_validation_report": validation_report.to_dict(),
             "plan_revision": int(state.get("plan_revision", 0)) + 1,
             "errors": {"planner": str(error)},
@@ -873,6 +881,7 @@ class TripPlanningGraph:
             "status": status,
             "approval_prompt": approval_prompt,
             "trip_plan": values.get("trip_plan"),
+            "raw_trip_plan": values.get("raw_trip_plan"),
             "poi_validation_report": values.get("poi_validation_report", {}),
             "errors": values.get("errors", {}),
             "events": values.get("events", []),

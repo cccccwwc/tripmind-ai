@@ -25,6 +25,12 @@ def plan_payload():
     ).model_dump(mode="json")
 
 
+def raw_plan_payload():
+    payload = plan_payload()
+    payload["overall_suggestions"] = "原始模型输出"
+    return payload
+
+
 class FakeWorkflow:
     def __init__(self):
         self.results = {}
@@ -41,6 +47,7 @@ class FakeWorkflow:
             "workflow_id": workflow_id,
             "status": "completed",
             "trip_plan": plan_payload(),
+            "raw_trip_plan": raw_plan_payload(),
             "events": [
                 {"node": "prepare", "status": "completed", "message": "开始并行查询", "at": "1"},
                 {"node": "attractions", "status": "completed", "message": "获得 2 个景点", "at": "2"},
@@ -89,5 +96,8 @@ def test_background_job_persists_progress_and_result(tmp_path):
         assert events[0]["type"] == "queued"
         assert any(event["type"] == "completed" for event in events)
         assert any(event.get("node") == "attractions" for event in events)
+        completed = next(event for event in events if event["type"] == "completed")
+        assert completed["data"]["overall_suggestions"] == "测试"
+        assert completed["raw_data"]["overall_suggestions"] == "原始模型输出"
     finally:
         manager.close()

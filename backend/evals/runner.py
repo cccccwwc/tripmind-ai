@@ -40,6 +40,36 @@ DEFAULT_MAXIMUMS = {
     "schedule_conflict_rate": 0.0,
     "fallback_rate": 0.20,
 }
+RELEASE_THRESHOLDS = {
+    "raw_capture_coverage_rate": 0.95,
+    "raw_output_coverage_rate": 0.80,
+    "raw_stage_score": 0.65,
+    "final_stage_score": 0.80,
+    "final_poi_type_coverage_rate": 0.95,
+    "final_poi_type_pass_rate": 0.95,
+    "final_route_distance_pass_rate": 0.95,
+    "final_commute_coverage_rate": 0.60,
+    "final_commute_duration_pass_rate": 0.85,
+    "final_avoidance_pass_rate": 1.0,
+    "human_review_coverage_rate": 1.0,
+    "human_score": 0.80,
+}
+HARD_TAGS = {
+    "avoidance",
+    "accessibility",
+    "intake-only",
+    "missing-date",
+    "missing-city",
+    "multi-turn",
+    "partial-day",
+    "winter",
+    "pace-limit",
+    "constraint",
+    "duration-conflict",
+    "correction",
+    "memory-override",
+    "regression",
+}
 
 
 def load_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -125,6 +155,132 @@ def _tool_calls_from_events(
     return calls
 
 
+def _normal(value: Any) -> str:
+    return re.sub(r"[^0-9a-z\u4e00-\u9fff]", "", str(value or "").casefold())
+
+
+def _route_mode(value: Any) -> str:
+    text = _normal(value)
+    if any(token in text for token in ("自驾", "打车", "包车", "租车", "出租", "网约")):
+        return "driving"
+    if any(token in text for token in ("公交", "地铁", "轨道", "公共交通")):
+        return "transit"
+    return "walking"
+
+
+def _location_index(day: dict[str, Any]) -> dict[str, tuple[float, float]]:
+    index: dict[str, tuple[float, float]] = {}
+
+    def add(item: dict[str, Any] | None) -> None:
+        if not item or not isinstance(item.get("location"), dict):
+            return
+        try:
+            point = (float(item["location"]["longitude"]), float(item["location"]["latitude"]))
+        except (KeyError, TypeError, ValueError):
+            return
+        for value in (item.get("name"), item.get("address")):
+            key = _normal(value)
+            if key:
+                index[key] = point
+
+    for item in day.get("attractions") or []:
+        add(item)
+    for item in day.get("meals") or []:
+        add(item)
+    add(day.get("hotel"))
+    return index
+
+
+def _match_point(value: Any, index: dict[str, tuple[float, float]]) -> tuple[float, float] | None:
+    key = _normal(value)
+    if not key:
+        return None
+    if key in index:
+        return index[key]
+    matches = [point for label, point in index.items() if len(label) >= 3 and (label in key or key in label)]
+    return matches[0] if matches else None
+
+
+def _amap_route_truth(
+    client: httpx.Client,
+    api_key: str,
+    origin: tuple[float, float],
+    destination: tuple[float, float],
+    mode: str,
+    city: str,
+) -> dict[str, Any]:
+    endpoint = {
+        "driving": "https://restapi.amap.com/v3/direction/driving",
+        "transit": "https://restapi.amap.com/v3/direction/transit/integrated",
+        "walking": "https://restapi.amap.com/v3/direction/walking",
+    }[mode]
+    params = {
+        "key": api_key,
+        "origin": f"{origin[0]:.6f},{origin[1]:.6f}",
+        "destination": f"{destination[0]:.6f},{destination[1]:.6f}",
+    }
+    if mode == "transit":
+        params.update({"city": city, "cityd": city})
+    response = client.get(endpoint, params=params)
+    response.raise_for_status()
+    payload = response.json()
+    if payload.get("status") != "1":
+        raise RuntimeError(str(payload.get("info") or "AMap route error"))
+    route = payload.get("route") or {}
+    candidates = route.get("transits") if mode == "transit" else route.get("paths")
+    first = (candidates or [None])[0]
+    if not isinstance(first, dict):
+        raise RuntimeError("AMap route has no path")
+    return {
+        "actual_distance_meters": float(first.get("distance") or 0),
+        "actual_duration_seconds": float(first.get("duration") or 0),
+    }
+
+
+def collect_route_checks(plan: dict[str, Any], *, maximum_checks: int = 12) -> list[dict[str, Any]]:
+    api_key = (os.getenv("AMAP_API_KEY") or "").strip()
+    if not api_key or not plan:
+        return []
+    checks: list[dict[str, Any]] = []
+    with httpx.Client(timeout=25) as route_client:
+        for day in plan.get("days") or []:
+            index = _location_index(day)
+            for item in day.get("schedule") or []:
+                if item.get("item_type") != "transport" or len(checks) >= maximum_checks:
+                    continue
+                origin = _match_point(item.get("from_location"), index)
+                destination = _match_point(item.get("to_location"), index)
+                check = {
+                    "date": day.get("date"),
+                    "from": item.get("from_location"),
+                    "to": item.get("to_location"),
+                    "mode": _route_mode(item.get("transport_mode")),
+                    "planned_duration_minutes": float(item.get("duration_minutes") or 0),
+                    "success": False,
+                }
+                if origin is None or destination is None:
+                    check["error"] = "unresolved_endpoint"
+                    checks.append(check)
+                    continue
+                try:
+                    truth = _amap_route_truth(
+                        route_client,
+                        api_key,
+                        origin,
+                        destination,
+                        check["mode"],
+                        str(plan.get("city") or ""),
+                    )
+                    check.update(truth)
+                    check["success"] = bool(truth["actual_duration_seconds"])
+                except (httpx.HTTPError, RuntimeError, ValueError, TypeError) as exc:
+                    check["error"] = str(exc)[:160]
+                checks.append(check)
+            if len(checks) >= maximum_checks:
+                break
+    return checks
+
+
 def _trip_request(brief: dict[str, Any], case: dict[str, Any]) -> dict[str, Any]:
     return {
         "city": brief["city"],
@@ -150,6 +306,7 @@ def collect_live_run(
     timeout_seconds: float,
     input_cost_per_million: float,
     output_cost_per_million: float,
+    maximum_route_checks: int,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     record: dict[str, Any] = {"case_id": case["id"], "source": "live-api"}
@@ -187,13 +344,22 @@ def collect_live_run(
         event_response = client.get(f"{base_url}/api/trip/jobs/{job['job_id']}/events")
         event_response.raise_for_status()
         events = _parse_sse(event_response.text)
+        raw_trip_plan = next(
+            (event.get("raw_data") for event in reversed(events) if "raw_data" in event),
+            None,
+        )
         record.update({
             "trip_plan": job.get("data"),
+            "raw_trip_plan": raw_trip_plan or {},
             "events": events,
             "errors": ({"job": job.get("error")} if job.get("error") else {}),
             "tool_calls": _tool_calls_from_events(events, request),
             "error": job.get("error"),
         })
+        record["route_checks"] = collect_route_checks(
+            record.get("trip_plan") or {},
+            maximum_checks=maximum_route_checks,
+        )
     except Exception as exc:
         record["error"] = str(exc)
         record.setdefault("planning_brief", {})
@@ -338,6 +504,37 @@ def _markdown(report: dict[str, Any]) -> str:
         lines.append(f"| LLM-as-judge 抽检分 | {summary['llm_judge_score'] * 100:.2f}% |")
     lines.extend([
         "",
+        "## 原始输出 vs 修复后输出",
+        "",
+        "| 阶段 | 捕获/输出覆盖 | 质量分 | POI 类型 | 路线距离 | 避雷约束 | 真实通勤时间 |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        (
+            f"| 原始模型输出 | {summary['raw_capture_coverage_rate'] * 100:.2f}% | "
+            f"{summary['raw_stage_score'] * 100:.2f}% | {summary['raw_poi_type_pass_rate'] * 100:.2f}% | "
+            f"{summary['raw_route_distance_pass_rate'] * 100:.2f}% | {summary['raw_avoidance_pass_rate'] * 100:.2f}% | 不调用外部路线 |"
+        ),
+        (
+            f"| 修复后最终输出 | {summary['final_output_coverage_rate'] * 100:.2f}% | "
+            f"{summary['final_stage_score'] * 100:.2f}% | {summary['final_poi_type_pass_rate'] * 100:.2f}% | "
+            f"{summary['final_route_distance_pass_rate'] * 100:.2f}% | {summary['final_avoidance_pass_rate'] * 100:.2f}% | "
+            f"{summary['final_commute_duration_pass_rate'] * 100:.2f}% |"
+        ),
+    ])
+    hard = report.get("hard_set") or {}
+    hard_summary = hard.get("summary") or {}
+    if hard_summary:
+        lines.extend([
+            "",
+            "## Hard-set",
+            "",
+            f"- 样本数：{hard_summary['case_count']}",
+            f"- 规则总分：{hard_summary['rule_score'] * 100:.2f}%",
+            f"- 原始输出质量：{hard_summary['raw_stage_score'] * 100:.2f}%",
+            f"- 修复后输出质量：{hard_summary['final_stage_score'] * 100:.2f}%",
+            f"- 人工评分覆盖：{hard_summary['human_review_coverage_rate'] * 100:.2f}%",
+        ])
+    lines.extend([
+        "",
         "## 门禁结果",
         "",
         "通过" if not report["threshold_failures"] else "未通过：",
@@ -382,10 +579,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=float, default=600)
     parser.add_argument("--human-reviews", type=Path)
     parser.add_argument("--judge-sample", type=int, default=0, help="使用 LLM 评审前 N 个样本")
+    parser.add_argument("--max-route-checks", type=int, default=12, help="每条样本最多调用的真实路线核验数")
+    parser.add_argument(
+        "--hard-tags",
+        default=",".join(sorted(HARD_TAGS)),
+        help="逗号分隔的 hard-set 标签",
+    )
     parser.add_argument("--input-cost-per-million", type=float, default=0.0)
     parser.add_argument("--output-cost-per-million", type=float, default=0.0)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_REPORTS)
     parser.add_argument("--fail-on-threshold", action="store_true")
+    parser.add_argument(
+        "--release-gate",
+        action="store_true",
+        help="启用原始/修复输出、路线、POI 类型、避雷和人工评分严格发布门禁",
+    )
     return parser
 
 
@@ -411,6 +619,7 @@ def main(argv: list[str] | None = None) -> int:
                     timeout_seconds=args.timeout,
                     input_cost_per_million=args.input_cost_per_million,
                     output_cost_per_million=args.output_cost_per_million,
+                    maximum_route_checks=args.max_route_checks,
                 ))
         run_source = f"live:{args.base_url}"
     else:
@@ -438,13 +647,58 @@ def main(argv: list[str] | None = None) -> int:
     ]
     summary = summarize_results(results)
     failures = threshold_failures(summary, DEFAULT_THRESHOLDS, DEFAULT_MAXIMUMS)
+    hard_tags = {item.strip() for item in args.hard_tags.split(",") if item.strip()}
+    hard_results = [
+        item for item in results if hard_tags.intersection(item.get("tags") or [])
+    ]
+    hard_summary = summarize_results(hard_results) if hard_results else {}
+    if hard_summary:
+        hard_minimums = dict(DEFAULT_THRESHOLDS)
+        hard_maximums = dict(DEFAULT_MAXIMUMS)
+        if not hard_summary["planned_case_count"]:
+            for metric in list(hard_minimums):
+                if metric.startswith("poi_") or metric == "selected_place_coverage_rate":
+                    hard_minimums.pop(metric)
+            hard_maximums.pop("schedule_conflict_rate", None)
+            hard_maximums.pop("fallback_rate", None)
+        failures.extend(
+            f"hard-set {item}"
+            for item in threshold_failures(hard_summary, hard_minimums, hard_maximums)
+        )
+    if args.release_gate:
+        failures.extend(
+            f"release {item}"
+            for item in threshold_failures(
+                summary,
+                RELEASE_THRESHOLDS,
+                require_present=True,
+            )
+        )
+        if hard_summary:
+            failures.extend(
+                f"hard-set release {item}"
+                for item in threshold_failures(
+                    hard_summary,
+                    RELEASE_THRESHOLDS,
+                    require_present=True,
+                )
+            )
     generated_at = datetime.now(timezone.utc).isoformat()
     report = {
         "generated_at": generated_at,
         "dataset": str(args.dataset),
         "run_source": run_source,
         "summary": summary,
-        "thresholds": {"minimums": DEFAULT_THRESHOLDS, "maximums": DEFAULT_MAXIMUMS},
+        "hard_set": {
+            "tags": sorted(hard_tags),
+            "case_ids": [item["case_id"] for item in hard_results],
+            "summary": hard_summary,
+        },
+        "thresholds": {
+            "minimums": DEFAULT_THRESHOLDS,
+            "maximums": DEFAULT_MAXIMUMS,
+            "release_minimums": RELEASE_THRESHOLDS,
+        },
         "threshold_failures": failures,
         "results": results,
     }
@@ -475,7 +729,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"人工评分模板: {human_template}")
     if failures:
         print("门禁未通过: " + "；".join(failures))
-    return 1 if failures and args.fail_on_threshold else 0
+    return 1 if failures and (args.fail_on_threshold or args.release_gate) else 0
 
 
 if __name__ == "__main__":

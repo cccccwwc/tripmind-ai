@@ -35,6 +35,8 @@ class ResolvedPOI:
     confidence: float
     city: str = ""
     district: str = ""
+    poi_type: str = ""
+    poi_typecode: str = ""
     operational_status: str = "unknown"
     data_source: str = "amap"
     verified_at: str = ""
@@ -89,6 +91,8 @@ class POILocationService:
             confidence=confidence,
             city=str(poi.get("cityname") or "").strip(),
             district=str(poi.get("adname") or "").strip(),
+            poi_type=str(poi.get("type") or "").strip(),
+            poi_typecode=str(poi.get("typecode") or "").strip(),
             # AMap place/text confirms the POI identity, not live opening
             # status. Explicit closure markers are rejected above; all other
             # places remain unknown until a dedicated opening-hours source is used.
@@ -190,6 +194,8 @@ class POILocationService:
                 confidence=result.confidence,
                 city=result.city or city,
                 district=result.district,
+                poi_type=result.poi_type,
+                poi_typecode=result.poi_typecode,
                 operational_status=result.operational_status,
                 data_source=result.data_source,
                 verified_at=result.verified_at,

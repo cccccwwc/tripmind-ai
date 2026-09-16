@@ -262,6 +262,8 @@ class MultiAgentTripPlanner:
                     attraction.poi_id = ""
                     attraction.city = ""
                     attraction.district = ""
+                    attraction.poi_type = ""
+                    attraction.poi_typecode = ""
                     attraction.operational_status = "unknown"
                     attraction.data_source = ""
                     attraction.verified_at = ""
@@ -278,6 +280,8 @@ class MultiAgentTripPlanner:
                 attraction.poi_id = resolved.poi_id
                 attraction.city = resolved.city or city
                 attraction.district = resolved.district
+                attraction.poi_type = resolved.poi_type
+                attraction.poi_typecode = resolved.poi_typecode
                 attraction.operational_status = resolved.operational_status
                 attraction.data_source = resolved.data_source or "amap"
                 attraction.verified_at = resolved.verified_at or datetime.now(timezone.utc).isoformat()
@@ -383,7 +387,7 @@ class MultiAgentTripPlanner:
 4. 相邻地点之间必须有 transport 项，写清起点、终点、交通方式、预计分钟数和距离
 5. 所有 start_time/end_time 使用 HH:MM，前后不得重叠，要给排队、步行与换乘预留时间
 6. 只能使用“高德校验后的景点候选”中明确列出的地点，不得自行发明、改名或加入名单外景点
-7. 景点必须原样复制候选中的 poi_id、city、district、location、operational_status、data_source、verified_at 和 verification_confidence
+7. 景点必须原样复制候选中的 poi_id、city、district、poi_type、poi_typecode、location、operational_status、data_source、verified_at 和 verification_confidence
 8. 优先安排游客主动选择的地点；除非日期、距离或营业条件明显冲突，否则不要替换
 9. 酒店只能从“高德校验后的酒店候选”中选择；如果没有候选，hotel 返回 null
 """
@@ -402,7 +406,11 @@ class MultiAgentTripPlanner:
             for item in request.selected_recommendations
         )
     
-    def _parse_response(self, response: str, request: TripRequest) -> TripPlan:
+    def _parse_response_stages(
+        self,
+        response: str,
+        request: TripRequest,
+    ) -> tuple[TripPlan | None, TripPlan]:
         """
         解析Agent响应
         
@@ -436,7 +444,8 @@ class MultiAgentTripPlanner:
             data = json.loads(json_str)
             
             # 转换为TripPlan对象
-            trip_plan = TripPlan(**data)
+            raw_trip_plan = TripPlan(**data)
+            trip_plan = raw_trip_plan.model_copy(deep=True)
             for day in trip_plan.days:
                 if day.schedule:
                     day.schedule.sort(key=lambda item: item.start_time)
@@ -446,12 +455,17 @@ class MultiAgentTripPlanner:
                 else:
                     day.schedule = self._build_fallback_schedule(day)
             
-            return trip_plan
+            return raw_trip_plan, trip_plan
             
         except Exception as e:
             print(f"⚠️  解析响应失败: {str(e)}")
             print(f"   将使用备用方案生成计划")
-            return self._create_fallback_plan(request)
+            return None, self._create_fallback_plan(request)
+
+    def _parse_response(self, response: str, request: TripRequest) -> TripPlan:
+        """保留旧调用面；工作流使用分阶段接口同时保留模型原始输出。"""
+        _, final_plan = self._parse_response_stages(response, request)
+        return final_plan
 
     @staticmethod
     def _time_to_minutes(value: str) -> int | None:
@@ -598,6 +612,8 @@ class MultiAgentTripPlanner:
                     poi_id=poi.poi_id,
                     city=poi.city or request.city,
                     district=poi.district,
+                    poi_type=poi.poi_type,
+                    poi_typecode=poi.poi_typecode,
                     operational_status=poi.operational_status,
                     data_source=poi.data_source or "amap",
                     verified_at=poi.verified_at or datetime.now(timezone.utc).isoformat(),

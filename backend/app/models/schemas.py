@@ -237,6 +237,8 @@ class Attraction(BaseModel):
     poi_id: Optional[str] = Field(default="", description="POI ID")
     city: str = Field(default="", description="高德返回的城市")
     district: str = Field(default="", description="高德返回的行政区")
+    poi_type: str = Field(default="", description="高德 POI 类型名称")
+    poi_typecode: str = Field(default="", description="高德 POI 类型编码")
     operational_status: str = Field(
         default="unknown",
         description="最近一次核验时的营业可用状态: available/unavailable/unknown",
